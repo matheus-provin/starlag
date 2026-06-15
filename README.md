@@ -1,4 +1,5 @@
 # starlag
+<img width="1198" height="713" alt="Captura de Tela 2026-06-15 às 17 03 50" src="https://github.com/user-attachments/assets/3f96b669-79c5-41a4-a44f-7425034c3cdc" />
 
 Simulador 3D de viagens interestelares relativísticas (C++ / Metal / macOS).
 
