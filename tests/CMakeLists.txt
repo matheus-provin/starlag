@@ -49,3 +49,10 @@ target_link_libraries(test_catalog_parser PRIVATE starlag_data)
 target_compile_definitions(test_catalog_parser PRIVATE
     STARLAG_TEST_CATALOG="${CMAKE_SOURCE_DIR}/data/hygdata_v42.csv")
 add_test(NAME catalog_parser COMMAND test_catalog_parser)
+
+# T1.3 — testes do índice de busca/seleção (sintéticos + catálogo real).
+add_executable(test_star_index test_star_index.cpp)
+target_link_libraries(test_star_index PRIVATE starlag_data)
+target_compile_definitions(test_star_index PRIVATE
+    STARLAG_TEST_CATALOG="${CMAKE_SOURCE_DIR}/data/hygdata_v42.csv")
+add_test(NAME star_index COMMAND test_star_index)

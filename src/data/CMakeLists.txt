@@ -8,6 +8,7 @@
 add_library(starlag_data STATIC
     CatalogCache.cpp
     CatalogParser.cpp
+    StarIndex.cpp
 )
 
 target_include_directories(starlag_data PUBLIC ${CMAKE_SOURCE_DIR}/src)

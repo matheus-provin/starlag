@@ -232,21 +232,58 @@ cmake --build build && ctest --test-dir build   # 8/8 PASS
 
 </details>
 
-### [ ] T1.3 — Índice de busca + seleção de estrelas por nome/id · ⬜ TODO
+### [x] T1.3 — Índice de busca + seleção de estrelas por nome/id · ✅ DONE
 Estruturas para localizar estrela por nome próprio, HIP/HD, e por proximidade espacial.
 Suporte a busca textual (para o painel de busca da UI) e lookup rápido.
 <details><summary>Notas de implementação</summary>
 
-_(a preencher ao concluir)_
+**O que foi feito** (`data/StarIndex.{h,cpp}`, lib `starlag_data`):
+- Classe `StarIndex` **não-dona** dos dados: guarda um ponteiro para o `std::vector<Star>`
+  do `ParseReport` e indexa apenas posições (o vetor deve sobreviver/não realocar enquanto o
+  índice está em uso — documentado no header).
+- **Lookup exato O(1)** via `unordered_map`: `byId`, `byHip`, `byHd`. HIP/HD == 0 ("ausente" no
+  HYG) **não** são indexados, evitando colidir todos os sem-catálogo no balde 0.
+- **Busca textual** `searchByName(query, limit)` → `vector<SearchHit>`:
+  - case-insensitive (helper `normalize`: lower ASCII + trim);
+  - pontuação `matchScore`: 3 = igualdade exata, 2 = prefixo, 1 = substring;
+  - ordenação por (score ↓, nome mais curto, alfabético) → ordem estável p/ a UI (T4.2);
+  - `bestByName` = atalho para o topo. Query vazia / sem casamento → vazio.
+- **Consultas espaciais** (posições em parsecs, varredura linear O(n)):
+  - `nearestTo(x,y,z, exclude=nullptr)` — vizinha mais próxima, podendo excluir uma estrela
+    (ex.: a própria origem). Base para o picking 3D (T2.4).
+  - `withinRadius(x,y,z, raioPc, limit)` — estrelas num raio, ordenadas por distância.
+  - Usa distância² (sem `sqrt`) nas comparações. **Nota:** linear basta para seleção pontual;
+    trocar por k-d tree só se virar gargalo (muitas queries/frame) — anotado no `.cpp`.
+
+**Testes (`tests/test_star_index.cpp`, alvo CTest `star_index`) — todos PASS:**
+- Sintéticos: lookups por id/HIP/HD (incl. ausência e HIP/HD=0→null); busca textual
+  (case, exato vs prefixo vs substring, desempate por tamanho, limite, query vazia);
+  espacial (nearest com/sem exclude, withinRadius com ordem e limite, raio negativo→vazio);
+  bordas (índice vazio / 0 estrelas).
+- **Catálogo HYG real:** "Vega"/"sirius" por nome (case-insensitive), round-trip nome↔id,
+  **Vega HIP 91262** confere; busca parcial "cent" traz resultados.
+  **Validação científica:** vizinha mais próxima do Sol = **Proxima Centauri a 1.296 pc**
+  (real ≈1.30 pc) e **5 estrelas a ≤2 pc** — coerente com a vizinhança solar.
+
+**Arquivos:** `src/data/{StarIndex.h,StarIndex.cpp}` (novos), `src/data/CMakeLists.txt`
+(+StarIndex.cpp), `tests/test_star_index.cpp` + `tests/CMakeLists.txt` (alvo novo).
+```sh
+cmake --build build && ctest --test-dir build --output-on-failure   # 9/9 PASS
+```
 
 </details>
 
-### [ ] T1.4 — Enriquecimento via API externa (SIMBAD/Wikipedia) sob demanda · ⬜ TODO
+### [ ] T1.4 — Enriquecimento via API externa (SIMBAD/Wikipedia) sob demanda · ⏸️ ADIADA
 Ao selecionar uma estrela, buscar nome comum/tipo espectral/descrição via API. Cache em
 memória/disco. Degradar graciosamente se offline. (Requisito "consumir APIs".)
 <details><summary>Notas de implementação</summary>
 
-_(a preencher ao concluir)_
+**Decisão (2026-06-15): ADIADA por escolha do usuário** — não consumir API externa por ora.
+Fica como to-do para retomar mais tarde. O Marco 1 segue funcional offline-first sem ela
+(catálogo HYG local + índice de busca já cobrem origem/destino). Não bloqueia o render (M2)
+nem a UI (M4); o enriquecimento é opcional e degrada graciosamente quando ausente.
+
+_(implementação a preencher quando a tarefa for retomada)_
 
 </details>
 
