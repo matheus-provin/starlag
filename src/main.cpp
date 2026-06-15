@@ -9,13 +9,19 @@
 //  Render de estrelas (M2) e UI ImGui (M4) entram nos próximos marcos.
 // ============================================================================
 
+#include "data/CatalogParser.h"
 #include "physics/Calendar.h"
 #include "physics/Simulation.h"
+#include "render/Camera.h"
 #include "render/MetalWindow.h"
+#include "render/StarField.h"
+
+#include <glm/glm.hpp>
 
 #include <chrono>
 #include <cstdio>
 #include <exception>
+#include <vector>
 
 namespace {
 
@@ -74,12 +80,35 @@ int main() {
         // Prova de vida da física dentro do app (antes de abrir a janela).
         printDemoTrip();
 
-        starlag::render::MetalWindow window(1280, 720, "starlag");
-        // Azul-noite escuro: o céu profundo onde as estrelas serão desenhadas
-        // a partir do Marco 2. (Validado em T0.2 que o loop limpa a cada frame.)
+        // --- Carrega o catálogo HYG e monta o campo de estrelas (T2.2) ---
+        std::vector<starlag::render::StarInstance> starField;
+        {
+            const starlag::data::ParseReport rep =
+                starlag::data::parseCatalogFile(STARLAG_CATALOG_PATH);
+            if (rep.ok) {
+                starField = starlag::render::buildStarField(rep.stars);
+                std::printf("Catalogo: %zu estrelas carregadas para render.\n",
+                            starField.size());
+            } else {
+                std::printf("Aviso: catalogo nao carregado (%s). Render so da grade.\n",
+                            rep.message.c_str());
+            }
+        }
+
+        const int winW = 1280, winH = 720;
+        starlag::render::MetalWindow window(winW, winH, "starlag");
+        // Azul-noite escuro: o céu profundo onde as estrelas são desenhadas.
         const starlag::render::ClearColor skyColor{0.02, 0.02, 0.06, 1.0};
 
-        std::printf("starlag v0.1.0 — janela Metal aberta (feche para sair).\n");
+        // Câmera 3D (T2.1): posicionada acima e atrás da origem, olhando o Sol.
+        // Perspectiva de 60°, far amplo p/ a escala estelar (parsecs).
+        starlag::render::Camera camera;
+        camera.lookAt(glm::vec3(8.0f, 6.0f, 12.0f), glm::vec3(0.0f, 0.0f, 0.0f));
+        camera.setPerspective(glm::radians(60.0f),
+                              static_cast<float>(winW) / static_cast<float>(winH),
+                              0.1f, 2000.0f);
+
+        std::printf("starlag v0.1.0 — janela Metal aberta (campo de estrelas 3D; feche para sair).\n");
 
         // Contadores para medir FPS médio a cada ~1 segundo.
         auto fpsWindowStart = clock::now();
@@ -87,7 +116,20 @@ int main() {
 
         while (window.isOpen()) {
             window.pollEvents();
-            window.renderClearFrame(skyColor);
+
+            // Acompanha o aspect atual do framebuffer (cobre resize da janela).
+            int fbW = 0, fbH = 0;
+            window.framebufferSize(&fbW, &fbH);
+            if (fbW > 0 && fbH > 0) {
+                camera.setAspect(static_cast<float>(fbW) / static_cast<float>(fbH));
+            }
+
+            // Renderiza o campo de estrelas (+ grade de referência) pela câmera.
+            const glm::mat4 vp = camera.viewProjection();
+            window.renderStars(&vp[0][0],
+                               starField.empty() ? nullptr
+                                                 : &starField[0].px,
+                               starField.size(), skyColor, /*drawGrid=*/true);
 
             // --- Medição de FPS ---
             ++framesInWindow;

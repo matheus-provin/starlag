@@ -42,9 +42,31 @@ public:
     // Processa eventos do SO (teclado/mouse/fechar). Chame uma vez por frame.
     void pollEvents();
 
+    // Tamanho do framebuffer em pixels (resolução nativa, já com Retina). Útil
+    // para atualizar o aspect da câmera ao redimensionar a janela.
+    void framebufferSize(int* width, int* height) const;
+
     // Renderiza um frame: adquire o drawable, limpa com `color` e apresenta.
     // O present ocorre no vsync, fixando o ritmo em ~60 FPS na maioria dos Macs.
     void renderClearFrame(const ClearColor& color);
+
+    // Renderiza a cena de teste 3D (T2.1): grade no plano XZ + eixos coloridos,
+    // vistos pela matriz `viewProj` (16 floats column-major = projection*view,
+    // p.ex. de Camera::viewProjection()). Limpa com `color`, usa depth buffer e
+    // apresenta no vsync. Compila o pipeline na primeira chamada (lazy).
+    //
+    // Recebe a matriz como ponteiro cru para não vazar GLM/ObjC pelo header
+    // (GLM e Metal compartilham o layout column-major, então é cópia direta).
+    void renderTestScene(const float* viewProj, const ClearColor& color);
+
+    // Renderiza o campo de estrelas (T2.2): `instanceData` aponta para `count`
+    // instâncias de 7 floats cada (posição XYZ + cor RGB + tamanho), conforme
+    // StarInstance/StarField. Visto pela matriz `viewProj`. Limpa com `color`,
+    // usa depth buffer e blending alpha (discos macios). Compila o pipeline de
+    // pontos na primeira chamada (lazy). Se `drawGrid` for true, desenha também
+    // a grade/eixos de referência (T2.1) por baixo das estrelas.
+    void renderStars(const float* viewProj, const float* instanceData,
+                     size_t count, const ClearColor& color, bool drawGrid = true);
 
 private:
     struct Impl;                 // definido em MetalWindow.mm (ObjC++).

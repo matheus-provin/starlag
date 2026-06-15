@@ -56,3 +56,20 @@ target_link_libraries(test_star_index PRIVATE starlag_data)
 target_compile_definitions(test_star_index PRIVATE
     STARLAG_TEST_CATALOG="${CMAKE_SOURCE_DIR}/data/hygdata_v42.csv")
 add_test(NAME star_index COMMAND test_star_index)
+
+# T2.1 — testes da câmera 3D / matrizes view-projection (GLM puro, headless).
+add_executable(test_camera test_camera.cpp)
+target_link_libraries(test_camera PRIVATE starlag_render)
+add_test(NAME camera COMMAND test_camera)
+
+# T2.2 — testes da cor de estrelas (B−V/spect → RGB).
+add_executable(test_star_color test_star_color.cpp)
+target_link_libraries(test_star_color PRIVATE starlag_render)
+add_test(NAME star_color COMMAND test_star_color)
+
+# T2.2 — testes da montagem do campo de estrelas (instâncias + sizing).
+add_executable(test_star_field test_star_field.cpp)
+target_link_libraries(test_star_field PRIVATE starlag_render)
+target_compile_definitions(test_star_field PRIVATE
+    STARLAG_TEST_CATALOG="${CMAKE_SOURCE_DIR}/data/hygdata_v42.csv")
+add_test(NAME star_field COMMAND test_star_field)
