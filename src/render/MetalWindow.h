@@ -14,6 +14,7 @@
 
 #include "render/InputState.h"
 
+#include <functional>
 #include <memory>
 #include <string>
 
@@ -79,6 +80,19 @@ public:
     void renderStars(const float* viewProj, const float* instanceData,
                      size_t count, const ClearColor& color, bool drawGrid = true,
                      const float* markerData = nullptr, size_t markerCount = 0);
+
+    // Callback de UI (T4.1): chamado DENTRO do render pass do renderStars, após
+    // a cena e antes de fechar o encoder, recebendo os handles ObjC opacos do
+    // frame: (renderPassDescriptor, commandBuffer, renderCommandEncoder). O
+    // ImGuiLayer usa esses handles para desenhar a UI sobre a cena. nullptr = sem UI.
+    using UiCallback = std::function<void(void* renderPass, void* commandBuffer,
+                                          void* encoder)>;
+    void setUiCallback(UiCallback cb);
+
+    // Handles internos (T4.1) para inicializar o ImGuiLayer: GLFWwindow* e
+    // id<MTLDevice>, como void* (cast no .mm de quem consome). Uso restrito.
+    void* glfwWindowHandle() const;
+    void* metalDeviceHandle() const;
 
 private:
     struct Impl;                 // definido em MetalWindow.mm (ObjC++).

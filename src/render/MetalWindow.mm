@@ -122,6 +122,9 @@ struct MetalWindow::Impl {
     NSUInteger markerCapacity = 0;
     id<MTLDepthStencilState> noDepthState = nil;
 
+    // Callback de UI (T4.1): desenhado dentro do render pass do renderStars.
+    MetalWindow::UiCallback uiCallback;
+
     // Depth buffer; recriado quando o tamanho do drawable muda.
     id<MTLTexture> depthTexture = nil;
     NSUInteger depthW = 0, depthH = 0;
@@ -573,10 +576,27 @@ void MetalWindow::renderStars(const float* viewProj, const float* instanceData,
                     vertexCount:markerCount];
         }
 
+        // UI (T4.1): desenhada por cima da cena, no mesmo render pass.
+        if (impl_->uiCallback) {
+            impl_->uiCallback((__bridge void*)pass, (__bridge void*)cmd, (__bridge void*)enc);
+        }
+
         [enc endEncoding];
         [cmd presentDrawable:drawable];
         [cmd commit];
     }
+}
+
+void MetalWindow::setUiCallback(UiCallback cb) {
+    impl_->uiCallback = std::move(cb);
+}
+
+void* MetalWindow::glfwWindowHandle() const {
+    return impl_->window;
+}
+
+void* MetalWindow::metalDeviceHandle() const {
+    return (__bridge void*)impl_->device;
 }
 
 }  // namespace starlag::render

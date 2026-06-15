@@ -13,6 +13,8 @@ add_library(starlag_render STATIC
     FlyCameraController.cpp
     Picker.cpp
     StarInfo.cpp
+    SelectionModel.cpp
+    ImGuiLayer.mm
 )
 
 # Permite #include "render/MetalWindow.h" a partir da raiz de src/.
@@ -20,6 +22,9 @@ target_include_directories(starlag_render PUBLIC ${CMAKE_SOURCE_DIR}/src)
 
 # StarColor/StarField usam o struct Star da camada de dados.
 target_link_libraries(starlag_render PUBLIC starlag_data)
+
+# Dear ImGui (core + backends GLFW/Metal) para a camada de UI (T4.1).
+target_link_libraries(starlag_render PUBLIC imgui)
 
 # Diretório dos shaders .metal, lido em runtime por MetalWindow.mm (T2.1).
 # Quando o app for empacotado, migrar para um .metallib no bundle.
@@ -44,5 +49,5 @@ target_link_libraries(starlag_render PUBLIC
 )
 
 # ARC (Automatic Reference Counting) para o código Objective-C++.
-set_source_files_properties(MetalWindow.mm PROPERTIES
+set_source_files_properties(MetalWindow.mm ImGuiLayer.mm PROPERTIES
     COMPILE_FLAGS "-fobjc-arc")

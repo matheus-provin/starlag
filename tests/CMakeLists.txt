@@ -83,3 +83,8 @@ add_test(NAME fly_camera COMMAND test_fly_camera)
 add_executable(test_picker test_picker.cpp)
 target_link_libraries(test_picker PRIVATE starlag_render)
 add_test(NAME picker COMMAND test_picker)
+
+# T4.2 — testes da máquina de seleção origem/destino.
+add_executable(test_selection_model test_selection_model.cpp)
+target_link_libraries(test_selection_model PRIVATE starlag_render)
+add_test(NAME selection_model COMMAND test_selection_model)

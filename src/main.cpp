@@ -10,15 +10,20 @@
 // ============================================================================
 
 #include "data/CatalogParser.h"
+#include "data/StarIndex.h"
 #include "physics/Calendar.h"
 #include "physics/Constants.h"
 #include "physics/Simulation.h"
 #include "render/Camera.h"
 #include "render/FlyCameraController.h"
+#include "render/ImGuiLayer.h"
 #include "render/MetalWindow.h"
 #include "render/Picker.h"
+#include "render/SelectionModel.h"
 #include "render/StarField.h"
 #include "render/StarInfo.h"
+
+#include "imgui.h"
 
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_inverse.hpp>
@@ -27,6 +32,7 @@
 #include <cmath>
 #include <cstdio>
 #include <exception>
+#include <string>
 #include <vector>
 
 namespace {
@@ -92,8 +98,10 @@ int main() {
         const starlag::data::ParseReport catalog =
             starlag::data::parseCatalogFile(STARLAG_CATALOG_PATH);
         std::vector<starlag::render::StarInstance> starField;
+        starlag::data::StarIndex starIndex;  // busca textual/lookup (T1.3 → T4.2).
         if (catalog.ok) {
             starField = starlag::render::buildStarField(catalog.stars);
+            starIndex.build(catalog.stars);
             std::printf("Catalogo: %zu estrelas carregadas para render.\n",
                         starField.size());
         } else {
@@ -128,16 +136,20 @@ int main() {
         starlag::render::FlyCameraController fly;
         fly.setSpeed(8.0);  // ~8 parsecs/s: cobre a vizinhança solar com agilidade.
 
-        std::printf("starlag v0.1.0 — campo de estrelas 3D.\n");
+        // Inicializa a camada de UI ImGui (T4.1) com os handles do MetalWindow.
+        starlag::render::ImGuiLayer ui;
+        ui.init(window.glfwWindowHandle(), window.metalDeviceHandle());
+
+        std::printf("starlag v0.1.0 — campo de estrelas 3D + UI.\n");
         std::printf("  Navegacao: WASD mover | E/Q (Space/Ctrl) subir/descer | botao DIR olhar\n");
         std::printf("             scroll = avancar/recuar | -/= ajustar velocidade\n");
-        std::printf("  Selecao  : CLIQUE esquerdo p/ escolher origem; 2o clique p/ destino.\n");
-        std::printf("             (3o clique reinicia a selecao.) Feche a janela p/ sair.\n");
+        std::printf("  Selecao  : CLIQUE esquerdo (ou busque no painel) p/ origem; 2o p/ destino.\n");
+        std::printf("  Painel   : ajuste velocidade/aceleracao/data e clique 'Simular viagem'.\n");
 
-        // --- Estado de seleção origem/destino (T2.4) ---
-        // Índices na lista catalog.stars; -1 = nada selecionado ainda.
-        long selOrigin = -1;
-        long selDest = -1;
+        // --- Estado de seleção origem/destino (T4.2) ---
+        // SelectionModel unifica a seleção por clique (T2.4) e por busca (T4.2):
+        // ambos chamam selectStar() / setOrigin() / setDestination().
+        starlag::render::SelectionModel selection;
         // Marcadores (origem ciano, destino magenta) — instâncias StarInstance
         // grandes, reconstruídas quando a seleção muda.
         std::vector<starlag::render::StarInstance> markers;
@@ -154,9 +166,171 @@ int main() {
                 m.size = 22.0f;  // bem maior que as estrelas comuns.
                 markers.push_back(m);
             };
-            addMarker(selOrigin, 0.2f, 1.0f, 1.0f);  // ciano = origem.
-            addMarker(selDest, 1.0f, 0.2f, 1.0f);    // magenta = destino.
+            addMarker(selection.origin(), 0.2f, 1.0f, 1.0f);       // ciano = origem.
+            addMarker(selection.destination(), 1.0f, 0.2f, 1.0f);  // magenta = destino.
         };
+
+        // Buffer do campo de busca textual (T4.2) e um modo de atribuição: o
+        // próximo resultado clicado vira origem, destino, ou segue a máquina de
+        // estados (auto). Persistem entre frames (a UI é redesenhada por frame).
+        char searchBuf[64] = {0};
+        enum class AssignMode { Auto, Origin, Destination };
+        AssignMode assignMode = AssignMode::Auto;
+
+        // --- Parâmetros de viagem controlados pelo painel (T4.1) ---
+        // Velocidade em % de c (até 99.99999); aceleração em g; modo de física;
+        // data de partida (campos inteiros). Alimentam runSimulation ao "Simular".
+        struct UiState {
+            float cruisePercentC = 99.0f;   // % de c (0 < v < 100).
+            float accelG = 1.0f;            // aceleração própria em g.
+            bool accelerated = true;        // true=acelerado, false=v constante.
+            int year = 2026, month = 6, day = 15;
+            bool hasResult = false;
+            std::string resultSummary;      // resumo em linguagem natural.
+            double properYr = 0, coordYr = 0, peakGamma = 0, contractedLy = 0;
+            std::string arrivalShip, arrivalOrigin;
+        } uiState;
+
+        // Roda a simulação com os parâmetros atuais do painel para o par
+        // origem→destino selecionado. Preenche uiState com o resultado.
+        auto runTrip = [&]() {
+            if (!selection.complete()) return;
+            const auto& o = catalog.stars[static_cast<size_t>(selection.origin())];
+            const auto& d = catalog.stars[static_cast<size_t>(selection.destination())];
+            const double dPc = std::sqrt(
+                (d.x - o.x) * (d.x - o.x) + (d.y - o.y) * (d.y - o.y) +
+                (d.z - o.z) * (d.z - o.z));
+            starlag::physics::TripRequest req;
+            req.distanceLy = dPc * starlag::physics::kParsec_ly;
+            req.mode = uiState.accelerated
+                           ? starlag::physics::PhysicsMode::Accelerated
+                           : starlag::physics::PhysicsMode::ConstantVelocity;
+            req.accelG = uiState.accelG;
+            // % de c → beta, limitado a < 1 pela física (clampBeta).
+            req.cruiseBeta = uiState.cruisePercentC / 100.0;
+            req.departureDate = starlag::physics::Date{uiState.year, uiState.month,
+                                                       uiState.day, 0.0};
+            req.originName = starlag::render::displayName(o);
+            req.destinationName = starlag::render::displayName(d);
+            const auto r = starlag::physics::runSimulation(req);
+            uiState.hasResult = true;
+            uiState.resultSummary = r.summary;
+            uiState.properYr = r.properTimeYr;
+            uiState.coordYr = r.coordinateTimeYr;
+            uiState.peakGamma = r.peakGamma;
+            uiState.contractedLy = r.contractedDistanceLy;
+            uiState.arrivalShip = starlag::physics::formatDate(r.arrivalDateShip);
+            uiState.arrivalOrigin = starlag::physics::formatDate(r.arrivalDateOrigin);
+        };
+
+        // Callback de UI: desenha os painéis. Roda dentro do render pass (T4.1).
+        window.setUiCallback([&](void* pass, void* cmd, void* enc) {
+            ui.beginFrame(pass);
+
+            // Helper: aplica uma seleção (por índice) seguindo o modo escolhido.
+            auto applySelection = [&](long idx) {
+                switch (assignMode) {
+                    case AssignMode::Origin:      selection.setOrigin(idx); break;
+                    case AssignMode::Destination: selection.setDestination(idx); break;
+                    case AssignMode::Auto:        selection.selectStar(idx); break;
+                }
+                uiState.hasResult = false;  // seleção mudou: resultado antigo obsoleto.
+                rebuildMarkers();
+            };
+
+            ImGui::Begin("Viagem interestelar");
+            // Origem/destino selecionados.
+            ImGui::Text("Origem : %s", selection.hasOrigin()
+                ? starlag::render::displayName(
+                      catalog.stars[static_cast<size_t>(selection.origin())]).c_str()
+                : "(clique ou busque)");
+            ImGui::Text("Destino: %s", selection.hasDestination()
+                ? starlag::render::displayName(
+                      catalog.stars[static_cast<size_t>(selection.destination())]).c_str()
+                : "(2o clique ou busque)");
+            if (ImGui::Button("Limpar selecao")) {
+                selection.clear();
+                uiState.hasResult = false;
+                rebuildMarkers();
+            }
+            ImGui::Separator();
+
+            // Parâmetros.
+            ImGui::Checkbox("Acelerado (1g-style)", &uiState.accelerated);
+            if (uiState.accelerated) {
+                ImGui::SliderFloat("Aceleracao (g)", &uiState.accelG, 0.1f, 10.0f, "%.2f g");
+            }
+            ImGui::SliderFloat("Velocidade (% c)", &uiState.cruisePercentC,
+                               1.0f, 99.99999f, "%.5f %%");
+            ImGui::InputInt("Ano", &uiState.year);
+            ImGui::InputInt("Mes", &uiState.month);
+            ImGui::InputInt("Dia", &uiState.day);
+
+            const bool canSim = selection.complete();
+            if (!canSim) ImGui::BeginDisabled();
+            if (ImGui::Button("Simular viagem")) runTrip();
+            if (!canSim) ImGui::EndDisabled();
+
+            ImGui::End();
+
+            // --- Painel de busca de estrelas por nome (T4.2) ---
+            ImGui::Begin("Buscar estrela");
+            ImGui::TextUnformatted("Nome proprio (ex.: Vega, Sirius):");
+            ImGui::InputText("##busca", searchBuf, sizeof(searchBuf));
+
+            // Para onde vai o próximo resultado escolhido.
+            int modeInt = static_cast<int>(assignMode);
+            ImGui::TextUnformatted("Atribuir a:");
+            ImGui::SameLine(); ImGui::RadioButton("Auto", &modeInt, 0);
+            ImGui::SameLine(); ImGui::RadioButton("Origem", &modeInt, 1);
+            ImGui::SameLine(); ImGui::RadioButton("Destino", &modeInt, 2);
+            assignMode = static_cast<AssignMode>(modeInt);
+
+            ImGui::Separator();
+            if (searchBuf[0] != '\0' && !starIndex.empty()) {
+                const auto hits = starIndex.searchByName(searchBuf, 15);
+                if (hits.empty()) {
+                    ImGui::TextDisabled("(nenhum resultado)");
+                }
+                for (const auto& hit : hits) {
+                    const starlag::data::Star& s = *hit.star;
+                    // Rótulo: nome + distância + tipo espectral. ID no '##' p/ unicidade.
+                    char label[128];
+                    std::snprintf(label, sizeof(label), "%s  —  %.1f ly  %s##%lld",
+                                  starlag::render::displayName(s).c_str(),
+                                  s.distLy, s.spect.c_str(),
+                                  static_cast<long long>(s.id));
+                    if (ImGui::Selectable(label)) {
+                        // Acha o índice da estrela no vetor do catálogo (id → posição).
+                        // O StarIndex referencia o mesmo vetor; o ponteiro aritmético
+                        // dá o índice diretamente.
+                        const long idx = static_cast<long>(hit.star - &catalog.stars[0]);
+                        applySelection(idx);
+                    }
+                }
+            } else if (starIndex.empty()) {
+                ImGui::TextDisabled("(catalogo nao carregado)");
+            } else {
+                ImGui::TextDisabled("(digite para buscar)");
+            }
+            ImGui::End();
+
+            // Painel de resultado (básico — completo na T4.3).
+            if (uiState.hasResult) {
+                ImGui::Begin("Resultado");
+                ImGui::Text("Tempo a bordo : %.3f anos  (chegada %s)",
+                            uiState.properYr, uiState.arrivalShip.c_str());
+                ImGui::Text("Tempo origem  : %.3f anos  (chegada %s)",
+                            uiState.coordYr, uiState.arrivalOrigin.c_str());
+                ImGui::Text("Fator Lorentz : %.3f (pico)", uiState.peakGamma);
+                ImGui::Text("Dist. contraida: %.3f anos-luz", uiState.contractedLy);
+                ImGui::Separator();
+                ImGui::TextWrapped("%s", uiState.resultSummary.c_str());
+                ImGui::End();
+            }
+
+            ui.endFrame(cmd, enc);
+        });
 
         // Contadores para medir FPS médio a cada ~1 segundo.
         auto fpsWindowStart = clock::now();
@@ -171,8 +345,16 @@ int main() {
             const double dt = std::chrono::duration<double>(frameNow - lastFrame).count();
             lastFrame = frameNow;
 
-            // Aplica a navegação 6-DOF (T2.3) a partir do input do frame.
-            fly.update(camera, window.input(), dt);
+            // Gating de input pela UI: quando o cursor está sobre um painel
+            // ImGui, ele captura o mouse/teclado — então não navegamos nem
+            // fazemos picking (evita "voar" ou selecionar ao mexer no painel).
+            const bool uiMouse = ui.wantCaptureMouse();
+            const bool uiKeyboard = ui.wantCaptureKeyboard();
+
+            // Aplica a navegação 6-DOF (T2.3), exceto quando a UI usa o teclado.
+            if (!uiKeyboard) {
+                fly.update(camera, window.input(), dt);
+            }
 
             // Acompanha o aspect atual do framebuffer (cobre resize da janela).
             int fbW = 0, fbH = 0;
@@ -185,7 +367,7 @@ int main() {
 
             // --- Seleção por clique (T2.4): ray-cast → estrela mais próxima ---
             const starlag::render::InputState& in = window.input();
-            if (in.clicked && catalog.ok && fbW > 0 && fbH > 0) {
+            if (in.clicked && !uiMouse && catalog.ok && fbW > 0 && fbH > 0) {
                 const glm::mat4 invVP = glm::inverse(vp);
                 const starlag::render::Ray ray = starlag::render::screenPointToRay(
                     in.cursorX, in.cursorY, fbW, fbH, invVP, camera.position());
@@ -196,39 +378,20 @@ int main() {
                 if (pick.hit) {
                     const long idx = static_cast<long>(pick.index);
                     const starlag::data::Star& s = catalog.stars[pick.index];
-                    if (selOrigin < 0) {
-                        selOrigin = idx;
+                    // Detecta o papel resultante comparando o estado antes/depois.
+                    const bool wasComplete = selection.complete();
+                    const bool hadOrigin = selection.hasOrigin();
+                    selection.selectStar(idx);
+                    if (!hadOrigin || wasComplete) {
                         std::printf("\n>>> ORIGEM selecionada:\n%s",
                                     starlag::render::formatStarInfo(s).c_str());
-                    } else if (selDest < 0 && idx != selOrigin) {
-                        selDest = idx;
+                    } else if (selection.destination() == idx) {
                         const starlag::data::Star& origin =
-                            catalog.stars[static_cast<size_t>(selOrigin)];
+                            catalog.stars[static_cast<size_t>(selection.origin())];
                         std::printf("\n>>> DESTINO selecionado:\n%s",
                                     starlag::render::formatStarInfo(s, &origin).c_str());
-                        // Bônus: roda a simulação relativística Sol-like origem→destino.
-                        const double dPc = std::sqrt(
-                            (s.x - origin.x) * (s.x - origin.x) +
-                            (s.y - origin.y) * (s.y - origin.y) +
-                            (s.z - origin.z) * (s.z - origin.z));
-                        starlag::physics::TripRequest req;
-                        req.distanceLy = dPc * starlag::physics::kParsec_ly;
-                        req.mode = starlag::physics::PhysicsMode::Accelerated;
-                        req.accelG = 1.0;
-                        req.cruiseBeta = 0.9999999;
-                        req.departureDate = starlag::physics::Date{2026, 6, 15, 0.0};
-                        req.originName = starlag::render::displayName(origin);
-                        req.destinationName = starlag::render::displayName(s);
-                        const starlag::physics::SimulationResult r =
-                            starlag::physics::runSimulation(req);
-                        std::printf("  Viagem @1g: %s\n", r.summary.c_str());
-                    } else {
-                        // 3º clique: reinicia a seleção começando nova origem.
-                        selOrigin = idx;
-                        selDest = -1;
-                        std::printf("\n>>> Nova ORIGEM (selecao reiniciada):\n%s",
-                                    starlag::render::formatStarInfo(s).c_str());
                     }
+                    uiState.hasResult = false;  // seleção mudou: resultado obsoleto.
                     rebuildMarkers();
                 }
             }
