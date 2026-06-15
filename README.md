@@ -4,15 +4,13 @@ Simulador 3D de viagens interestelares relativísticas (C++ / Metal / macOS).
 
 Navegue por um mapa galáctico 3D com estrelas reais (catálogo HYG), escolha
 origem e destino, ajuste velocidade (até 99.99999% de *c*), aceleração própria e
-data de partida — e veja, ao chegar, **quanto tempo passou para a tripulação vs.
+data de partida, e veja, ao chegar, **quanto tempo passou para a tripulação vs.
 para um observador na origem**, com datas no calendário gregoriano.
 
 Projeto de **aprendizado pessoal**: C++ moderno, API gráfica **Metal** e física
 relativística aplicada. Prioridades: clareza de código, evolução incremental e
 correção científica.
 
-Veja [REQUIREMENTS.md](REQUIREMENTS.md) (o quê) e [PLANNING.md](PLANNING.md)
-(taskboard M0–M6).
 
 ## Stack
 
@@ -53,7 +51,7 @@ claude-cpp/
 | GLFW | `brew install glfw` |
 | GLM | `brew install glm` |
 | nlohmann/json | `brew install nlohmann-json` |
-| libcurl | já incluída no SDK do macOS (nada a fazer) |
+| libcurl | já incluída no SDK do macOS |
 | Dear ImGui | `git clone --depth 1 --branch v1.91.5 https://github.com/ocornut/imgui.git third_party/imgui` |
 
 Resumo:
