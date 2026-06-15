@@ -97,6 +97,13 @@ struct MetalWindow::Impl {
     id<MTLCommandQueue> queue = nil;
     CAMetalLayer* layer = nil;
 
+    // Estado de input (T2.3), preenchido a cada pollEvents().
+    InputState input;
+    double lastMouseX = 0.0, lastMouseY = 0.0;
+    bool hadMouse = false;       // já temos uma posição anterior do mouse?
+    double scrollAccum = 0.0;    // acumulado pela callback de scroll do GLFW.
+    bool prevLeftDown = false;   // estado anterior do botão esquerdo (T2.4: clique).
+
     // Recursos da cena de teste (T2.1), criados sob demanda na 1ª renderização.
     id<MTLRenderPipelineState> pipeline = nil;
     id<MTLDepthStencilState> depthState = nil;
@@ -108,6 +115,12 @@ struct MetalWindow::Impl {
     id<MTLRenderPipelineState> starPipeline = nil;
     id<MTLBuffer> starBuffer = nil;
     NSUInteger starCapacity = 0;  // capacidade do buffer, em nº de instâncias.
+
+    // Marcadores de seleção (T2.4): buffer próprio + estado de profundidade
+    // "sempre passa" (desenha por cima das estrelas, sem ser ocluído).
+    id<MTLBuffer> markerBuffer = nil;
+    NSUInteger markerCapacity = 0;
+    id<MTLDepthStencilState> noDepthState = nil;
 
     // Depth buffer; recriado quando o tamanho do drawable muda.
     id<MTLTexture> depthTexture = nil;
@@ -220,6 +233,13 @@ void MetalWindow::Impl::ensureStarResources() {
         const char* msg = err ? err.localizedDescription.UTF8String : "desconhecido";
         throw std::runtime_error(std::string("Falha ao criar pipeline de estrelas: ") + msg);
     }
+
+    // Estado de profundidade "sempre passa" (sem escrita) para os marcadores de
+    // seleção (T2.4) aparecerem por cima do campo de estrelas.
+    MTLDepthStencilDescriptor* nd = [[MTLDepthStencilDescriptor alloc] init];
+    nd.depthCompareFunction = MTLCompareFunctionAlways;
+    nd.depthWriteEnabled = NO;
+    noDepthState = [device newDepthStencilStateWithDescriptor:nd];
 }
 
 void MetalWindow::Impl::ensureDepthTexture(NSUInteger w, NSUInteger h) {
@@ -283,6 +303,15 @@ MetalWindow::MetalWindow(int width, int height, const std::string& title)
     metalLayer.drawableSize = CGSizeMake(width * scale, height * scale);
 
     impl_->layer = metalLayer;
+
+    // --- 4) Input (T2.3): user pointer + callback de scroll. ---
+    // A roda do mouse só chega por callback no GLFW; acumulamos e drenamos no
+    // pollEvents. As teclas e a posição do mouse são lidas por polling direto.
+    glfwSetWindowUserPointer(impl_->window, impl_.get());
+    glfwSetScrollCallback(impl_->window, [](GLFWwindow* w, double /*dx*/, double dy) {
+        auto* impl = static_cast<Impl*>(glfwGetWindowUserPointer(w));
+        if (impl) impl->scrollAccum += dy;
+    });
 }
 
 MetalWindow::~MetalWindow() {
@@ -302,6 +331,66 @@ bool MetalWindow::isOpen() const {
 
 void MetalWindow::pollEvents() {
     glfwPollEvents();
+
+    GLFWwindow* w = impl_->window;
+    InputState& in = impl_->input;
+
+    // --- Teclas de movimento (estado atual: segurando) ---
+    auto held = [&](int key) { return glfwGetKey(w, key) == GLFW_PRESS; };
+    in.forward = held(GLFW_KEY_W);
+    in.back    = held(GLFW_KEY_S);
+    in.left    = held(GLFW_KEY_A);
+    in.right   = held(GLFW_KEY_D);
+    in.up      = held(GLFW_KEY_E) || held(GLFW_KEY_SPACE);
+    in.down    = held(GLFW_KEY_Q) || held(GLFW_KEY_LEFT_CONTROL);
+
+    // Ajuste de velocidade por teclas dedicadas (a borda é detectada no controller).
+    in.speedUp   = held(GLFW_KEY_EQUAL) || held(GLFW_KEY_RIGHT_BRACKET);
+    in.speedDown = held(GLFW_KEY_MINUS) || held(GLFW_KEY_LEFT_BRACKET);
+
+    // --- Mouse-look: ativo enquanto o botão direito está pressionado ---
+    in.looking = glfwGetMouseButton(w, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS;
+    double mx = 0.0, my = 0.0;
+    glfwGetCursorPos(w, &mx, &my);
+    if (in.looking && impl_->hadMouse) {
+        in.mouseDx = mx - impl_->lastMouseX;
+        in.mouseDy = my - impl_->lastMouseY;
+    } else {
+        in.mouseDx = 0.0;
+        in.mouseDy = 0.0;
+    }
+    impl_->lastMouseX = mx;
+    impl_->lastMouseY = my;
+    impl_->hadMouse = true;
+    // Esconde/trava o cursor durante o look para um fly mais confortável.
+    glfwSetInputMode(w, GLFW_CURSOR,
+                     in.looking ? GLFW_CURSOR_DISABLED : GLFW_CURSOR_NORMAL);
+
+    // --- Seleção (T2.4): posição do cursor + clique esquerdo (borda de soltura) ---
+    // glfwGetCursorPos dá PONTOS (screen coords); o ray-cast usa a viewport em
+    // PIXELS de framebuffer. Em telas Retina esses diferem pelo backing scale,
+    // então convertemos o cursor para pixels (senão o raio sai na escala errada
+    // e o marcador aparece deslocado do clique).
+    int winW = 0, winH = 0, fbW = 0, fbH = 0;
+    glfwGetWindowSize(w, &winW, &winH);
+    glfwGetFramebufferSize(w, &fbW, &fbH);
+    const double scaleX = (winW > 0) ? static_cast<double>(fbW) / winW : 1.0;
+    const double scaleY = (winH > 0) ? static_cast<double>(fbH) / winH : 1.0;
+    in.cursorX = mx * scaleX;
+    in.cursorY = my * scaleY;
+    const bool leftDown = glfwGetMouseButton(w, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS;
+    // Um "clique" é o frame em que o botão foi SOLTO (press→release): evita
+    // disparar repetidamente enquanto segura e não conflita com o arraste.
+    in.clicked = impl_->prevLeftDown && !leftDown && !in.looking;
+    impl_->prevLeftDown = leftDown;
+
+    // --- Scroll: drena o acumulado da callback ---
+    in.scrollDelta = impl_->scrollAccum;
+    impl_->scrollAccum = 0.0;
+}
+
+const InputState& MetalWindow::input() const {
+    return impl_->input;
 }
 
 void MetalWindow::framebufferSize(int* width, int* height) const {
@@ -397,7 +486,8 @@ void MetalWindow::renderTestScene(const float* viewProj, const ClearColor& color
 }
 
 void MetalWindow::renderStars(const float* viewProj, const float* instanceData,
-                              size_t count, const ClearColor& color, bool drawGrid) {
+                              size_t count, const ClearColor& color, bool drawGrid,
+                              const float* markerData, size_t markerCount) {
     @autoreleasepool {
         int fbW = 0, fbH = 0;
         glfwGetFramebufferSize(impl_->window, &fbW, &fbH);
@@ -461,6 +551,26 @@ void MetalWindow::renderStars(const float* viewProj, const float* instanceData,
             [enc drawPrimitives:MTLPrimitiveTypePoint
                     vertexStart:0
                     vertexCount:count];
+        }
+
+        // Marcadores de seleção (T2.4): por cima, sem teste de profundidade.
+        if (markerCount > 0 && markerData != nullptr) {
+            if (impl_->markerBuffer == nil || impl_->markerCapacity < markerCount) {
+                impl_->markerBuffer =
+                    [impl_->device newBufferWithLength:markerCount * floatsPerInstance * sizeof(float)
+                                               options:MTLResourceStorageModeShared];
+                impl_->markerCapacity = markerCount;
+            }
+            std::memcpy(impl_->markerBuffer.contents, markerData,
+                        markerCount * floatsPerInstance * sizeof(float));
+
+            [enc setRenderPipelineState:impl_->starPipeline];
+            [enc setDepthStencilState:impl_->noDepthState];  // sempre visível.
+            [enc setVertexBuffer:impl_->markerBuffer offset:0 atIndex:0];
+            [enc setVertexBytes:viewProj length:sizeof(float) * 16 atIndex:1];
+            [enc drawPrimitives:MTLPrimitiveTypePoint
+                    vertexStart:0
+                    vertexCount:markerCount];
         }
 
         [enc endEncoding];

@@ -10,6 +10,9 @@ add_library(starlag_render STATIC
     Camera.cpp
     StarColor.cpp
     StarField.cpp
+    FlyCameraController.cpp
+    Picker.cpp
+    StarInfo.cpp
 )
 
 # Permite #include "render/MetalWindow.h" a partir da raiz de src/.

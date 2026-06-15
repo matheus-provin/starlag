@@ -37,6 +37,13 @@ struct Star {
     double ci = 0.0;          // índice de cor B−V (para a cor de renderização).
     bool hasCi = false;       // o campo ci estava presente? (0.0 é um valor válido).
 
+    // --- Designação / catálogo (T2.4: enriquecem o painel de info) ---
+    std::string con;          // constelação (abrev. IAU, ex.: "Lyr").
+    std::string bayer;        // letra de Bayer (ex.: "Alp" para α).
+    std::string flam;         // número de Flamsteed (ex.: "3").
+    double lum = 0.0;         // luminosidade em unidades solares (L/L☉).
+    bool hasLum = false;      // o campo lum estava presente?
+
     // Conveniência: a estrela tem um nome próprio legível?
     bool hasProperName() const { return !proper.empty(); }
 };

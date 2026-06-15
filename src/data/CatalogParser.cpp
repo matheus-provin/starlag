@@ -114,6 +114,11 @@ ParseReport parseStream(std::istream& in) {
     const int iX = colOf("x");
     const int iY = colOf("y");
     const int iZ = colOf("z");
+    // Designação/catálogo (T2.4): opcionais — ausência não invalida o load.
+    const int iCon = colOf("con");
+    const int iBayer = colOf("bayer");
+    const int iFlam = colOf("flam");
+    const int iLum = colOf("lum");
 
     // Cabeçalho precisa ter ao menos posição e distância para ser útil.
     if (iX < 0 || iY < 0 || iZ < 0 || iDist < 0 || iId < 0) {
@@ -151,6 +156,12 @@ ParseReport parseStream(std::istream& in) {
         s.absmag = toDouble(fieldAt(f, iAbsmag));
         s.spect = fieldAt(f, iSpect);
         s.ci = toDouble(fieldAt(f, iCi), &s.hasCi);
+
+        // Designação/catálogo (T2.4): só lê se a coluna existir no cabeçalho.
+        if (iCon >= 0) s.con = fieldAt(f, iCon);
+        if (iBayer >= 0) s.bayer = fieldAt(f, iBayer);
+        if (iFlam >= 0) s.flam = fieldAt(f, iFlam);
+        if (iLum >= 0) s.lum = toDouble(fieldAt(f, iLum), &s.hasLum);
 
         rep.stars.push_back(std::move(s));
     }

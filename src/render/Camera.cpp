@@ -14,6 +14,8 @@
 
 #include <glm/gtc/matrix_transform.hpp>
 
+#include <cmath>
+
 namespace starlag::render {
 
 void Camera::lookAt(const glm::vec3& eye, const glm::vec3& target,
@@ -32,6 +34,35 @@ void Camera::setPerspective(float fovYRadians, float aspect, float nearZ,
 }
 
 void Camera::setAspect(float aspect) { aspect_ = aspect; }
+
+void Camera::setYawPitch(float yawRadians, float pitchRadians) {
+    yaw_ = yawRadians;
+    // Limita o pitch a ±89° para evitar gimbal flip (olhar exatamente para os
+    // polos degenera o vetor "up" do lookAt).
+    const float limit = glm::radians(89.0f);
+    pitch_ = glm::clamp(pitchRadians, -limit, limit);
+    // Mantém target_ coerente com a nova direção, para viewMatrix() continuar
+    // usando o lookAt(eye, target) sem precisar de um caminho separado.
+    target_ = eye_ + forward();
+}
+
+glm::vec3 Camera::forward() const {
+    // Convenção: yaw=0, pitch=0 → olhar para −Z (frente padrão da câmera).
+    // yaw gira em torno de +Y; pitch inclina em torno do eixo "right".
+    const float cp = std::cos(pitch_);
+    return glm::normalize(glm::vec3(-std::sin(yaw_) * cp,
+                                    std::sin(pitch_),
+                                    -std::cos(yaw_) * cp));
+}
+
+glm::vec3 Camera::right() const {
+    // right = forward × worldUp, normalizado (perpendicular ao plano vertical).
+    return glm::normalize(glm::cross(forward(), glm::vec3(0.0f, 1.0f, 0.0f)));
+}
+
+glm::vec3 Camera::up() const {
+    return glm::normalize(glm::cross(right(), forward()));
+}
 
 glm::mat4 Camera::viewMatrix() const {
     return glm::lookAt(eye_, target_, up_);

@@ -12,6 +12,8 @@
 
 #pragma once
 
+#include "render/InputState.h"
+
 #include <memory>
 #include <string>
 
@@ -40,7 +42,12 @@ public:
     bool isOpen() const;
 
     // Processa eventos do SO (teclado/mouse/fechar). Chame uma vez por frame.
+    // Atualiza o InputState consultável via input() (T2.3).
     void pollEvents();
+
+    // Estado de input do frame atual (teclas, mouse-look, scroll). Válido após
+    // pollEvents(). Desacopla a navegação do GLFW (ver FlyCameraController).
+    const InputState& input() const;
 
     // Tamanho do framebuffer em pixels (resolução nativa, já com Retina). Útil
     // para atualizar o aspect da câmera ao redimensionar a janela.
@@ -65,8 +72,13 @@ public:
     // usa depth buffer e blending alpha (discos macios). Compila o pipeline de
     // pontos na primeira chamada (lazy). Se `drawGrid` for true, desenha também
     // a grade/eixos de referência (T2.1) por baixo das estrelas.
+    //
+    // `markerData`/`markerCount` (T2.4): instâncias extras (mesmo layout de 7
+    // floats) desenhadas POR CIMA do campo, sem teste de profundidade, para
+    // destacar estrelas selecionadas (origem/destino). Pode ser nullptr/0.
     void renderStars(const float* viewProj, const float* instanceData,
-                     size_t count, const ClearColor& color, bool drawGrid = true);
+                     size_t count, const ClearColor& color, bool drawGrid = true,
+                     const float* markerData = nullptr, size_t markerCount = 0);
 
 private:
     struct Impl;                 // definido em MetalWindow.mm (ObjC++).

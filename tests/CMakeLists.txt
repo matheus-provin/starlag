@@ -73,3 +73,13 @@ target_link_libraries(test_star_field PRIVATE starlag_render)
 target_compile_definitions(test_star_field PRIVATE
     STARLAG_TEST_CATALOG="${CMAKE_SOURCE_DIR}/data/hygdata_v42.csv")
 add_test(NAME star_field COMMAND test_star_field)
+
+# T2.3 — testes da navegação 6-DOF (câmera fly + controlador, GLM puro).
+add_executable(test_fly_camera test_fly_camera.cpp)
+target_link_libraries(test_fly_camera PRIVATE starlag_render)
+add_test(NAME fly_camera COMMAND test_fly_camera)
+
+# T2.4 — testes do picking 3D (ray-casting) + StarInfo.
+add_executable(test_picker test_picker.cpp)
+target_link_libraries(test_picker PRIVATE starlag_render)
+add_test(NAME picker COMMAND test_picker)

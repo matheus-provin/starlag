@@ -36,6 +36,20 @@ public:
     void lookAt(const glm::vec3& eye, const glm::vec3& target,
                 const glm::vec3& up = glm::vec3(0.0f, 1.0f, 0.0f));
 
+    // --- Orientação por yaw/pitch (modo fly, T2.3) --------------------------
+    // Define a direção de visão por ângulos (radianos). yaw gira em torno do
+    // eixo Y do mundo; pitch inclina para cima/baixo. O alvo passa a ser
+    // derivado de posição + direção (a câmera deixa de "mirar" um ponto fixo).
+    void setYawPitch(float yawRadians, float pitchRadians);
+    float yaw() const { return yaw_; }
+    float pitch() const { return pitch_; }
+
+    // Vetores de base do referencial da câmera (unitários), derivados de
+    // yaw/pitch. `forward` aponta para onde a câmera olha.
+    glm::vec3 forward() const;
+    glm::vec3 right() const;
+    glm::vec3 up() const;
+
     // --- Configuração da projeção (perspectiva) -----------------------------
     // fovY em radianos; aspect = largura/altura; near/far são distâncias > 0.
     void setPerspective(float fovYRadians, float aspect, float nearZ, float farZ);
@@ -59,6 +73,11 @@ private:
     glm::vec3 eye_{0.0f, 0.0f, 5.0f};
     glm::vec3 target_{0.0f, 0.0f, 0.0f};
     glm::vec3 up_{0.0f, 1.0f, 0.0f};
+
+    // Orientação fly (radianos). Mantida em paralelo a eye_/target_: setYawPitch
+    // recomputa target_ = eye_ + forward(), então viewMatrix() não muda.
+    float yaw_ = 0.0f;
+    float pitch_ = 0.0f;
 
     // Projeção (valores padrão sensatos; sobrescritos por setPerspective).
     float fovY_ = glm::radians(60.0f);
