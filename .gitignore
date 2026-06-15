@@ -1,0 +1,29 @@
+# ---- Build (CMake) ----
+build/
+build-*/
+cmake-build-*/
+CMakeCache.txt
+CMakeFiles/
+compile_commands.json
+
+# ---- Xcode ----
+*.xcodeproj/xcuserdata/
+*.xcodeproj/project.xcworkspace/xcuserdata/
+*.xcworkspace/xcuserdata/
+DerivedData/
+*.xcuserstate
+
+# ---- Cache de dados estelares (baixados em runtime, não versionar) ----
+data/*.csv
+data/cache/
+
+# ---- Dependências de terceiros (se baixadas, não versionar binários) ----
+third_party/**/build/
+
+# ---- macOS ----
+.DS_Store
+
+# ---- Editores ----
+.vscode/
+.idea/
+*.swp
